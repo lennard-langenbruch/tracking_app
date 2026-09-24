@@ -1,4 +1,4 @@
-<h1>Standorterfassungs-App mit Azure Maps API</h1>
+<h1>Standorterfassungs-App mit Mapbox API</h1>
 
 <i>Zum Speichern und Analysieren zurückgelegter Strecken.</i>
 
