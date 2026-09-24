@@ -18,10 +18,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven {url = uri("https://atlas.microsoft.com/sdk/android")}
+        // Mapbox Maps SDK (v11 needs no secret download token anymore)
+        maven { url = uri("https://api.mapbox.com/downloads/v2/releases/maven") }
     }
 }
 
 rootProject.name = "FHMobileTracking"
 include(":app")
- 

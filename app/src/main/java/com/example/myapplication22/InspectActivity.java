@@ -1,58 +1,28 @@
 package com.example.myapplication22;
 
-import static com.azure.android.maps.control.options.BubbleLayerOptions.bubbleColor;
-import static com.azure.android.maps.control.options.BubbleLayerOptions.bubbleRadius;
-import static com.azure.android.maps.control.options.BubbleLayerOptions.bubbleStrokeColor;
-import static com.azure.android.maps.control.options.BubbleLayerOptions.bubbleStrokeWidth;
-import static com.azure.android.maps.control.options.CameraOptions.center;
-import static com.azure.android.maps.control.options.CameraOptions.zoom;
-import static com.azure.android.maps.control.options.Expression.get;
-import static com.azure.android.maps.control.options.Expression.literal;
-import static com.azure.android.maps.control.options.Expression.match;
-import static com.azure.android.maps.control.options.LineLayerOptions.strokeColor;
-import static com.azure.android.maps.control.options.LineLayerOptions.strokeWidth;
-import static com.azure.android.maps.control.options.SymbolLayerOptions.iconImage;
-import static com.azure.android.maps.control.options.SymbolLayerOptions.textColor;
-import static com.azure.android.maps.control.options.SymbolLayerOptions.textField;
-import static com.azure.android.maps.control.options.SymbolLayerOptions.textFont;
-import static com.azure.android.maps.control.options.SymbolLayerOptions.textOffset;
-
 import android.content.Intent;
-import android.content.pm.ResolveInfo;
-import android.graphics.Color;
 import android.location.Location;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.DocumentsContract;
-import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.Button;
-import android.widget.ImageView;
+import android.view.ViewGroup;
+import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
-import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 
-import com.azure.android.maps.control.AzureMaps;
-import com.azure.android.maps.control.MapControl;
-import com.azure.android.maps.control.controls.ZoomControl;
-import com.azure.android.maps.control.layer.BubbleLayer;
-import com.azure.android.maps.control.layer.LineLayer;
-import com.azure.android.maps.control.layer.SymbolLayer;
-import com.azure.android.maps.control.source.DataSource;
 import com.mapbox.geojson.Feature;
+import com.mapbox.geojson.FeatureCollection;
 import com.mapbox.geojson.LineString;
+import com.mapbox.geojson.MultiPoint;
 import com.mapbox.geojson.Point;
+import com.mapbox.maps.MapView;
+import com.mapbox.maps.Style;
 
 import java.io.File;
 import java.text.DecimalFormat;
@@ -62,274 +32,273 @@ import java.util.List;
 
 public class InspectActivity extends AppCompatActivity {
 
-    static { // Azure Maps API Key
-        //AzureMaps.setSubscriptionKey("");
-        AzureMaps.setSubscriptionKey("5a4-bIL2yWRWmQ_dYQA_Ca6B01S1XkQyOCRgQFdF_-s");
-    }
-    MapControl mapControl; // Azure Maps Object
-    DatabaseHelper sqliteDatabase;
-    InspectActivity instance = this;
-    float distance = 0f;
-    float totalDistance = 0f;
-    boolean isCalculated = false;
-    boolean isBubblesShow = false;
-    List<Point> points;
-    List<Coordinate> coordinates;
-    BubbleLayer bubbles;
+    private static final String TAG = "InspectActivity";
+
+    private static final float MUTED_ALPHA = 0.44f; // 0x70 / 0xFF, as the previous Waypoints text color
+
+    /** GPS height jitters by a few meters; smaller changes are not counted as ascent/descent. */
+    private static final double ALTITUDE_NOISE_THRESHOLD_M = 3.0;
+
+    private static final String TRACK_LINE_SOURCE = "track-line-src";
+    private static final String TRACK_ENDS_SOURCE = "track-ends-src";
+    private static final String WAYPOINTS_SOURCE = "waypoints-src";
+    private static final String WAYPOINTS_LAYER = "waypoint-bubbles";
+
+    private MapView mapControl; // Mapbox map (token: res/values/mapbox_access_token.xml)
+    private Style mapStyle; // null until the map style has finished loading
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        try {
+            onCreateInternal(savedInstanceState);
+        } catch (Exception e) {
+            // TEMPORARY diagnostic wrapper: logs the real crash instead of letting
+            // the process die silently and the task restart on the old MainActivity intent.
+            Log.e(TAG, "CRASH in onCreate", e);
+        }
+    }
 
-        /* Defaults */
+    private void onCreateInternal(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_inspect);
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
+        UiUtils.applySystemBarPadding(findViewById(R.id.main));
+        UiUtils.warnIfMapboxTokenMissing(this);
 
         /* Map initialisieren */
-        mapControl = findViewById(R.id.mapcontrol2);
-        mapControl.onCreate(savedInstanceState);
+        mapControl = findViewById(R.id.mapcontrol);
+        MapboxHelper.bindZoomButtons(mapControl, findViewById(R.id.zoomInButton), findViewById(R.id.zoomOutButton));
 
-
-        if (Build.VERSION.SDK_INT >= 30){
-            if (!Environment.isExternalStorageManager()){
-                Intent getpermission = new Intent();
-                getpermission.setAction(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-                startActivity(getpermission);
-            }
-        }
-
-        /* Extra Wert überreicht */
-        long trackid = -1;// default for not set
-        if (getIntent().hasExtra("trackid")) {
-            // Get the message from the intent
-            trackid = getIntent().getLongExtra("trackid", -2);
-        }
+        /* Extra Wert überreicht (-1: not set) */
+        long trackid = getIntent().getLongExtra("trackid", -1);
 
         /* Datenbankverbindung herstellen */
-        sqliteDatabase = new DatabaseHelper(this);
-        sqliteDatabase.getWritableDatabase(); // !!!
+        DatabaseHelper sqliteDatabase = new DatabaseHelper(this);
 
         /* Inspezierter Track */
         Track inspectedTrack = sqliteDatabase.getSingleTrack(trackid);
 
-        /* Textfelder füllen */
-        TextView header = findViewById(R.id.inspectedTrackName);
-        header.setText(inspectedTrack.getName());
+        /* Titel */
+        setText(R.id.inspectedTrackName, inspectedTrack.getName());
 
-        TextView elapsed = findViewById(R.id.elapsed);
-        elapsed.setText("Elapsed Time: " + inspectedTrack.getElapsedTime());
+        /* Koordinaten beschaffen, Wegpunkte und Gesamtdistanz berechnen */
+        List<Coordinate> coordinates = sqliteDatabase.getCoordinatesByTrackId(trackid);
 
-        TextView textViewDateStart = findViewById(R.id.textViewDateStart);
-        textViewDateStart.setText("Start Date: "+ inspectedTrack.getStart().replace(" ", " / "));
+        List<Point> points = new ArrayList<>();
+        Location previousLocation = null;
+        float totalDistance = 0f;
 
-        TextView textViewDateEnd = findViewById(R.id.textViewDateEnd);
-        textViewDateEnd.setText("Finish Date: "+ inspectedTrack.getFinish().replace(" ", " / "));
-
-        TextView textViewDistance = findViewById(R.id.distance);
-        textViewDistance.setText(inspectedTrack.getDistance());
-
-        Switch colorSwitch = findViewById(R.id.switchButton);
-
-
-        /* Koordinaten beschaffen */
-        coordinates = sqliteDatabase.getCoordinatesByTrackId(trackid); // Get your list of tracks from the database or elsewhere
-
-        Point current = null;
-        Location currentLocation = new Location("1");
-        Location previousLocation = new Location("2");
-        int count = 0;
-        points = new ArrayList<>();
-
-        for(Coordinate c : coordinates) {
-            currentLocation.setLongitude(Double.parseDouble(c.getLongitude()));
-            currentLocation.setLatitude(Double.parseDouble(c.getLatitude()));
-
-            if(isCalculated == false && count != 0) {
-                distance = currentLocation.distanceTo(previousLocation);
-
-                totalDistance = totalDistance + distance;
-            }
-
-            double longitude = Double.parseDouble(c.getLongitude());
+        for (Coordinate c : coordinates) {
             double latitude = Double.parseDouble(c.getLatitude());
+            double longitude = Double.parseDouble(c.getLongitude());
 
-            current = Point.fromLngLat(longitude, latitude);
+            Location currentLocation = new Location("1");
+            currentLocation.setLatitude(latitude);
+            currentLocation.setLongitude(longitude);
+            if (previousLocation != null) {
+                totalDistance += currentLocation.distanceTo(previousLocation);
+            }
+            previousLocation = currentLocation;
 
-            Log.d(String.valueOf(InspectActivity.class),current.toString());
-
-            points.add(current);
-
-            previousLocation.setLongitude(currentLocation.getLongitude());
-            previousLocation.setLatitude(currentLocation.getLatitude());
-
-            count++;
+            points.add(Point.fromLngLat(longitude, latitude));
         }
 
-        TextView textViewWaypoints = findViewById(R.id.waypoints);
-        textViewWaypoints.setTextColor(Color.parseColor("#70000000"));
-        textViewWaypoints.setText("Waypoints: " + points.size());
-
-        /*  1.2 Berechnete Distanz formatieren und schreiben */
-        isCalculated = true;
-        /* Distanz in Textfeld schreiben*/
+        /* Berechnete Distanz formatieren */
+        DecimalFormat decimalFormat = new DecimalFormat("#.##");
         String format;
-
-        if(totalDistance >= 1000) {
-            totalDistance = totalDistance / 1000; // to Kilometers
-            DecimalFormat decimalFormat = new DecimalFormat("#.##");
-            format = decimalFormat.format(totalDistance) + "km";
+        if (totalDistance >= 1000) {
+            format = decimalFormat.format(totalDistance / 1000) + " km"; // to Kilometers
         } else {
-            inspectedTrack.setDistance(String.valueOf(totalDistance));
-            DecimalFormat decimalFormat = new DecimalFormat("#.##");
-            format = decimalFormat.format(totalDistance) + "m";
+            format = decimalFormat.format(totalDistance) + " m";
         }
 
+        /* Daten als Zeilen "Label ..... Wert" untereinander */
+        LinearLayout dataRows = findViewById(R.id.dataRows);
+        String[] start = splitDateTime(inspectedTrack.getStart());
+        String[] finish = splitDateTime(inspectedTrack.getFinish());
+        addDataRow(dataRows, "Start Date", start[0]);
+        addDataRow(dataRows, "Start Time", start[1]);
+        addDataRow(dataRows, "Finish Date", finish[0]);
+        addDataRow(dataRows, "Finish Time", finish[1]);
+        addDataRow(dataRows, "Elapsed Time", formatElapsed(inspectedTrack.getElapsedTime()));
+        addDataRow(dataRows, "Distance", format);
+        double[] ascentDescent = calculateAscentDescent(coordinates);
+        addDataRow(dataRows, "Ascent", formatHeightDifference(ascentDescent[0], "+"));
+        addDataRow(dataRows, "Descent", formatHeightDifference(ascentDescent[1], "-"));
+        addDataRow(dataRows, "Waypoints", String.valueOf(points.size()), true); // greyed out (secondary info)
 
-        textViewDistance.setText("Distance: " + format);
+        /* Karte: einmal auf den Start zentrieren, Weg, Start & Ende zeichnen */
+        Switch waypointSwitch = findViewById(R.id.switchButton);
 
-
-
-
-        /* 1.3 ASYNC Initalisieren / Start, Ende & Weg zeichnen */
-        mapControl.getMapAsync(map -> {
-            /* Quelle Layer & Controls initialisieren */
-            map.controls.add(new ZoomControl());
-
-            DataSource dataSource = new DataSource();
-            map.sources.add(dataSource);
-
-            dataSource.add(LineString.fromLngLats(points)); // Line String geometry
-            LineLayer line = new LineLayer(dataSource, // Line layer
-                    strokeColor("#283593"),
-                    strokeWidth(5f)
-            );
-            map.layers.add(line);
-
-
-
-            /* Start */
-            DataSource startMarkerSource = new DataSource();
-            Feature startFeature = Feature.fromGeometry(points.get(0));
-            startFeature.addStringProperty("type", "start");
-            startFeature.addStringProperty("label", "S");
-            startMarkerSource.add(startFeature);
-            map.sources.add(startMarkerSource); // Add the data source to the map
-
-            SymbolLayer startLayer = new SymbolLayer(startMarkerSource, // Correctly reference the startMarkerSource
-                    textField(get("label")),
-                    iconImage(match(
-                            get("type"),
-                            literal("start"), literal("marker-darkblue"),
-                            literal("")
-                    )),
-                    textColor("#FFFFFF"),
-                    textOffset(new Float[] {0f, -1.0f})
-            );
-            map.layers.add(startLayer);
-
-            /* Finish */
-            DataSource finishMarkerSource = new DataSource();
-            Feature finishFeature = Feature.fromGeometry(points.get(points.size() - 1));
-            finishFeature.addStringProperty("type", "finish");
-            finishFeature.addStringProperty("label", "F");
-            finishMarkerSource.add(finishFeature);
-            map.sources.add(finishMarkerSource); // Add the data source to the map
-
-            SymbolLayer finishLayer = new SymbolLayer(finishMarkerSource, // Correctly reference the finishMarkerSource
-                    textField(get("label")),
-                    iconImage(match(
-                            get("type"),
-                            literal("finish"), literal("marker-darkblue"),
-                            literal("")
-                    )),
-                    textColor("#FFFFFF"),
-                    textOffset(new Float[] {0f, -1.0f})
-            );
-            map.layers.add(finishLayer);
-
-            /* Einmal zentrieren */
-            map.setCamera(
-                    center(points.get(0)), // start
-                    zoom(14)
-            );
-
-            colorSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                if (isChecked) {
-
-                    bubbles = new BubbleLayer(dataSource,
-                            bubbleRadius(1.5f),
-                            bubbleColor("#FFFFFF"),
-                            bubbleStrokeWidth(1f),
-                            bubbleStrokeColor("#FFFFFF")
-                    );
-                    map.layers.add(bubbles);
-                } else {
-                    map.layers.remove(bubbles);
-                }
-            });
+        if (!points.isEmpty()) {
+            MapboxHelper.centerOn(mapControl.getMapboxMap(), points.get(0).latitude(), points.get(0).longitude(), 14.0);
+        }
+        mapControl.getMapboxMap().loadStyle(MapboxHelper.STYLE_URI, style -> {
+            addTrackToMap(style, points);
+            MapboxHelper.setLayerVisible(style, WAYPOINTS_LAYER, waypointSwitch.isChecked());
+            mapStyle = style;
         });
 
-
-
-
-
-
-
-
-
-        /* 2. "Go Back" Button */
-        ImageView listingToMainButton = findViewById(R.id.clickableImageArrow);
-        listingToMainButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Intent intent = new Intent(InspectActivity.this, ListingActivity.class);
-                startActivity(intent);
+        // Draw a small circle "bubble" at every waypoint while the switch is on
+        waypointSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (mapStyle != null) {
+                MapboxHelper.setLayerVisible(mapStyle, WAYPOINTS_LAYER, isChecked);
             }
         });
 
+        /* "Go Back" Button */
+        findViewById(R.id.clickableImageArrow).setOnClickListener(
+                v -> startActivity(new Intent(this, ListingActivity.class)));
 
+        /* Export Button */
+        findViewById(R.id.exportButton).setOnClickListener(v -> {
+            BuildGpxHelper buildGpx = new BuildGpxHelper(this, inspectedTrack.getName(), coordinates);
+            String filePath = buildGpx.getTotalFilePath();
+            Uri fileUri = Uri.fromFile(new File(filePath));
 
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
+            shareIntent.setType("text/gpx");
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(shareIntent, null));
 
-
-
-        /* 3. Export Button */
-        Button exportButton = findViewById(R.id.exportButton);
-        exportButton.setOnClickListener(new View.OnClickListener() {
-            @RequiresApi(api = Build.VERSION_CODES.O)
-            @Override
-            public void onClick(View v) {
-
-                BuildGpxHelper buildGpx = new BuildGpxHelper(instance, inspectedTrack.getName(), coordinates);
-                String filePath = buildGpx.getTotalFilePath();
-                Log.d(String.valueOf(InspectActivity.class), filePath);
-                Uri fileUri = Uri.fromFile(new File(filePath));
-
-                Intent shareIntent = new Intent(Intent.ACTION_SEND);
-                shareIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
-                shareIntent.setType("text/gpx");
-                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                startActivity(Intent.createChooser(shareIntent, null));
-
-                Toast toast= Toast.makeText(InspectActivity.this,
-                        "GPX saved locally at \n" + filePath, Toast.LENGTH_LONG);
-                toast.setGravity(Gravity.TOP|Gravity.CENTER_HORIZONTAL, 0, 100);
-                toast.show();
-                /*
-                Log.d("","");
-                Intent intent = new Intent(Intent.ACTION_PICK_ACTIVITY);
-                Uri uri = Uri.parse("content://com.android.externalstorage.documents/document/primary:Download");
-                intent.setDataAndType(uri, "*//*");
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(intent);
-                */
-
-
-            }
+            Toast toast = Toast.makeText(this, "GPX saved locally at \n" + filePath, Toast.LENGTH_LONG);
+            toast.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 100);
+            toast.show();
         });
+    }
+
+    /** Adds the track line, the start/finish markers and the (initially hidden) waypoint bubbles. */
+    private void addTrackToMap(Style style, List<Point> points) {
+        if (points.isEmpty()) {
+            return;
+        }
+
+        // Weg zeichnen (a line needs at least two points)
+        if (points.size() > 1) {
+            MapboxHelper.addGeoJsonSource(style, TRACK_LINE_SOURCE,
+                    Feature.fromGeometry(LineString.fromLngLats(points)).toJson());
+            MapboxHelper.addLayer(style,
+                    "{\"id\":\"track-line\",\"type\":\"line\",\"source\":\"" + TRACK_LINE_SOURCE + "\",\"source-layer\":\"\","
+                            + "\"layout\":{\"line-cap\":\"round\",\"line-join\":\"round\"},"
+                            + "\"paint\":{\"line-color\":\"#283593\",\"line-width\":5}}");
+        }
+
+        // Start (S) & Finish (F)
+        Feature start = Feature.fromGeometry(points.get(0));
+        start.addStringProperty("label", "S");
+        start.addStringProperty("color", "#2E7D32");
+        Feature finish = Feature.fromGeometry(points.get(points.size() - 1));
+        finish.addStringProperty("label", "F");
+        finish.addStringProperty("color", "#C62828");
+        MapboxHelper.addGeoJsonSource(style, TRACK_ENDS_SOURCE,
+                FeatureCollection.fromFeatures(Arrays.asList(start, finish)).toJson());
+        MapboxHelper.addLayer(style,
+                "{\"id\":\"track-ends\",\"type\":\"circle\",\"source\":\"" + TRACK_ENDS_SOURCE + "\",\"source-layer\":\"\","
+                        + "\"paint\":{\"circle-radius\":11,\"circle-color\":[\"get\",\"color\"],"
+                        + "\"circle-stroke-width\":2,\"circle-stroke-color\":\"#FFFFFF\"}}");
+        MapboxHelper.addLayer(style,
+                "{\"id\":\"track-ends-label\",\"type\":\"symbol\",\"source\":\"" + TRACK_ENDS_SOURCE + "\",\"source-layer\":\"\","
+                        + "\"layout\":{\"text-field\":[\"get\",\"label\"],\"text-size\":13,"
+                        + "\"text-allow-overlap\":true,\"text-ignore-placement\":true},"
+                        + "\"paint\":{\"text-color\":\"#FFFFFF\"}}");
+
+        // Waypoint bubbles, shown/hidden with the switch
+        MapboxHelper.addGeoJsonSource(style, WAYPOINTS_SOURCE,
+                Feature.fromGeometry(MultiPoint.fromLngLats(points)).toJson());
+        MapboxHelper.addLayer(style,
+                "{\"id\":\"" + WAYPOINTS_LAYER + "\",\"type\":\"circle\",\"source\":\"" + WAYPOINTS_SOURCE + "\",\"source-layer\":\"\","
+                        + "\"layout\":{\"visibility\":\"none\"},"
+                        + "\"paint\":{\"circle-radius\":3,\"circle-color\":\"#FFFFFF\","
+                        + "\"circle-stroke-width\":1,\"circle-stroke-color\":\"#283593\"}}");
+    }
+
+    private void setText(int viewId, String text) {
+        ((TextView) findViewById(viewId)).setText(text);
+    }
+
+    /** Adds one row "label ..... value" (dotted leader in between) to the container. */
+    private void addDataRow(ViewGroup parent, String label, String value) {
+        addDataRow(parent, label, value, false);
+    }
+
+    /** Same, but a muted row is greyed out (same 44% black as the old "Waypoints" text, #70000000). */
+    private void addDataRow(ViewGroup parent, String label, String value, boolean muted) {
+        View row = getLayoutInflater().inflate(R.layout.item_data_row, parent, false);
+        ((TextView) row.findViewById(R.id.rowLabel)).setText(label);
+        ((TextView) row.findViewById(R.id.rowValue)).setText(value);
+        if (muted) {
+            row.setAlpha(MUTED_ALPHA);
+        }
+        parent.addView(row);
+    }
+
+    /**
+     * Sums up ascent and descent {meters up, meters down}. A change only counts once it differs by at
+     * least ALTITUDE_NOISE_THRESHOLD_M from the last counted height, so GPS noise while standing still
+     * or walking on flat ground does not add up. Both values are NaN if the track has no altitude data.
+     */
+    static double[] calculateAscentDescent(List<Coordinate> coordinates) {
+        double ascent = 0;
+        double descent = 0;
+        double reference = Double.NaN;
+
+        for (Coordinate c : coordinates) {
+            if (!c.hasAltitude()) {
+                continue;
+            }
+            double altitude = c.getAltitude();
+            if (Double.isNaN(reference)) {
+                reference = altitude;
+                continue;
+            }
+            double diff = altitude - reference;
+            if (diff >= ALTITUDE_NOISE_THRESHOLD_M) {
+                ascent += diff;
+                reference = altitude;
+            } else if (diff <= -ALTITUDE_NOISE_THRESHOLD_M) {
+                descent -= diff;
+                reference = altitude;
+            }
+        }
+
+        if (Double.isNaN(reference)) {
+            return new double[]{Double.NaN, Double.NaN}; // no altitude recorded (e.g. older tracks)
+        }
+        return new double[]{ascent, descent}; // 0/0 is a valid result: flat track
+    }
+
+    /** "+123 m" / "-45 m", or "-" if unknown. */
+    private static String formatHeightDifference(double meters, String sign) {
+        if (Double.isNaN(meters)) {
+            return "-";
+        }
+        long rounded = Math.round(meters);
+        return (rounded == 0 ? "" : sign) + rounded + " m";
+    }
+
+    /** Splits a timestamp "dd.MM.yy HH:mm:ss.SSS" into {date, time without milliseconds}. */
+    private static String[] splitDateTime(String timestamp) {
+        if (timestamp == null) {
+            return new String[]{"-", "-"};
+        }
+        String[] parts = timestamp.split(" ", 2);
+        String time = parts.length > 1 ? parts[1] : "-";
+        int dot = time.indexOf('.');
+        if (dot > 0) {
+            time = time.substring(0, dot);
+        }
+        return new String[]{parts[0], time};
+    }
+
+    /** Elapsed time is stored as "mm:ss:SSS"; shown as "mm:ss min" (other formats stay unchanged). */
+    private static String formatElapsed(String elapsed) {
+        if (elapsed == null) {
+            return "-";
+        }
+        if (elapsed.matches("\\d+:\\d+:\\d+")) {
+            return elapsed.substring(0, elapsed.lastIndexOf(':')) + " min";
+        }
+        return elapsed;
     }
 }

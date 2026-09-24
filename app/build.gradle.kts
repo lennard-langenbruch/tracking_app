@@ -8,12 +8,10 @@ android {
 
     defaultConfig {
         applicationId = "com.example.myapplication22"
-        minSdk = 21 // changed 21 to 24
+        minSdk = 21
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -32,17 +30,11 @@ android {
 }
 
 dependencies {
-    implementation(libs.lifecycle.viewmodel)
-    implementation(libs.lifecycle.viewmodel.ktx)
-    implementation ("com.azure.android:azure-maps-control:1.+") // Azure Maps
-    implementation ("org.apache.commons:commons-lang3:3.12.0") // StopWatch
-    // above added recursively
+    implementation(libs.mapbox.maps)
+    implementation("org.apache.commons:commons-lang3:3.12.0") // StopWatch
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.activity)
     implementation(libs.constraintlayout)
     implementation(libs.play.services.location)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.ext.junit)
-    androidTestImplementation(libs.espresso.core)
 }

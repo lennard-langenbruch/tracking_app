@@ -3,6 +3,7 @@ package com.example.myapplication22;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.location.Location;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -16,23 +17,22 @@ import com.google.android.gms.location.Priority;
 
 public class GeoLocationClient {
 
-    private final Context mContext;
+    private static final String TAG = "GeoLocationHelper";
+
     private final FusedLocationProviderClient mFusedLocationClient;
     private Location mLastUpdatedLocation;
     public double longitude;
     public double latitude;
-    public float distance;
+    public double altitude = Double.NaN; // meters, NaN = unknown
     private boolean isUpdatingLocation;
 
     public GeoLocationClient(Context context) {
-        mContext = context;
-        mFusedLocationClient = LocationServices.getFusedLocationProviderClient(mContext);
-        isUpdatingLocation = false;
+        mFusedLocationClient = LocationServices.getFusedLocationProviderClient(context);
         startLocationUpdates();
     }
 
     @SuppressLint("MissingPermission")
-    public void startLocationUpdates() {
+    private void startLocationUpdates() {
         if (!isUpdatingLocation) {
             LocationRequest locationRequest = new LocationRequest.Builder(
                     Priority.PRIORITY_HIGH_ACCURACY,
@@ -42,7 +42,7 @@ public class GeoLocationClient {
             mFusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, null);
 
             isUpdatingLocation = true;
-            Log.d("GeoLocationHelper", "Location updates started.");
+            Log.d(TAG, "Location updates started.");
         }
     }
 
@@ -50,33 +50,17 @@ public class GeoLocationClient {
         if (isUpdatingLocation) {
             mFusedLocationClient.removeLocationUpdates(locationCallback);
             isUpdatingLocation = false;
-            Log.d("GeoLocationHelper", "Location updates stopped.");
+            Log.d(TAG, "Location updates stopped.");
         }
     }
 
     private final LocationCallback locationCallback = new LocationCallback() {
         @Override
         public void onLocationResult(@NonNull LocationResult locationResult) {
-            if (locationResult == null) {
-                return;
-            }
-
             for (Location location : locationResult.getLocations()) {
-                Log.d("GeoLocationHelper", "onLocationChanged called");
-                Log.d("GeoLocationHelper", "Received location: Latitude: " + location.getLatitude() + ", Longitude: " + location.getLongitude());
-
-                if (mLastUpdatedLocation == null) {
-                    mLastUpdatedLocation = location;
+                // ignore movements of 1m or less
+                if (mLastUpdatedLocation == null || mLastUpdatedLocation.distanceTo(location) > 1.0) {
                     updateLocationVariables(location);
-                    Log.d("GeoLocationHelper", "First location fetched");
-                } else {
-                    distance = mLastUpdatedLocation.distanceTo(location);
-                    Log.d("GeoLocationHelper", "Distance to new location: " + distance);
-                    if (distance > 1.0) {
-                        updateLocationVariables(location);
-                    } else {
-                        Log.d("GeoLocationHelper", "Location variables not updated because distance to last updated location is less than 1m");
-                    }
                 }
             }
         }
@@ -86,6 +70,18 @@ public class GeoLocationClient {
         mLastUpdatedLocation = location;
         latitude = location.getLatitude();
         longitude = location.getLongitude();
-        Log.d("GeoLocationHelper", "Location variables updated: Latitude: " + latitude + ", Longitude: " + longitude);
+        altitude = readAltitude(location);
+    }
+
+    /**
+     * Altitude in meters. Prefers the height above mean sea level (provided by Android 14+ when the
+     * phone can compute it). Otherwise Location.getAltitude() is used, which Android defines as the
+     * height above the WGS84 ellipsoid, and that is roughly 40-50 m higher than sea level in Germany.
+     */
+    private static double readAltitude(Location location) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && location.hasMslAltitude()) {
+            return location.getMslAltitudeMeters();
+        }
+        return location.hasAltitude() ? location.getAltitude() : Double.NaN;
     }
 }

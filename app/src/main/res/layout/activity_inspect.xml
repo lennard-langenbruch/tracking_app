@@ -3,158 +3,125 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
+    android:background="@drawable/bg_contours"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:context=".InspectActivity">
 
-    <LinearLayout
-        android:id="@+id/inspectLinearLayout"
-        android:layout_width="409dp"
-        android:layout_height="729dp"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:textAlignment="center"
+    <!-- Scrollable, because the content grew taller than small screens (ascent/descent rows) -->
+    <ScrollView
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:fillViewport="true"
         app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
-
-        <ImageView
-            android:id="@+id/clickableImageArrow"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="left"
-            android:adjustViewBounds="true"
-            android:cropToPadding="false"
-            android:padding="15dp"
-            android:paddingStart="15dp"
-            android:paddingLeft="15dp"
-            android:paddingTop="15dp"
-            android:paddingEnd="15dp"
-            android:paddingRight="15dp"
-            android:paddingBottom="15dp"
-            android:scaleType="fitCenter"
-            app:srcCompat="@drawable/ic_back_arrow_4" />
-
-        <TextView
-            android:id="@+id/inspectedTrackName"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Recorded Track"
-            android:textAlignment="center"
-            android:textSize="34sp"
-            android:textStyle="bold" />
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="20dp" />
-
-        <com.azure.android.maps.control.MapControl
-            android:id="@+id/mapcontrol2"
-            android:layout_width="289dp"
-            android:layout_height="280dp"
-            app:layout_constraintVertical_bias="0.381" />
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="20dp" />
-
         <LinearLayout
+            android:id="@+id/inspectLinearLayout"
             android:layout_width="match_parent"
-            android:layout_height="30dp"
-            android:orientation="horizontal">
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:textAlignment="center">
 
-            <TextView
-                android:id="@+id/textView7"
+
+            <ImageView
+                android:id="@+id/clickableImageArrow"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:paddingLeft="45dp"
-                android:text="Show Waypoints" />
+                android:layout_gravity="left"
+                android:adjustViewBounds="true"
+                android:cropToPadding="false"
+                android:padding="15dp"
+                android:paddingStart="15dp"
+                android:paddingLeft="15dp"
+                android:paddingTop="15dp"
+                android:paddingEnd="15dp"
+                android:paddingRight="15dp"
+                android:paddingBottom="15dp"
+                android:scaleType="fitCenter"
+                app:srcCompat="@drawable/ic_back_arrow_4" />
 
-            <Switch
-                android:id="@+id/switchButton"
-                android:layout_width="73dp"
+            <TextView
+                android:id="@+id/inspectedTrackName"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:paddingRight="60dp"
-                android:switchMinWidth="50dp"
-                android:thumbTint="#283593" />
+                android:text="Recorded Track"
+                android:textAlignment="center"
+                android:textSize="34sp"
+                android:textStyle="bold" />
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="20dp" />
+
+            <!-- Mapbox map (access token: res/values/mapbox_access_token.xml) with zoom buttons on top -->
+            <FrameLayout
+                android:layout_width="318dp"
+                android:layout_height="280dp"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:foreground="@drawable/map_border">
+
+                <com.mapbox.maps.MapView
+                    android:id="@+id/mapcontrol"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <include layout="@layout/view_zoom_buttons" />
+            </FrameLayout>
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="20dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="30dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/textView7"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingLeft="45dp"
+                    android:text="Show Waypoints" />
+
+                <Switch
+                    android:id="@+id/switchButton"
+                    android:layout_width="73dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingRight="60dp"
+                    android:switchMinWidth="50dp"
+                    android:thumbTint="#283593" />
+            </LinearLayout>
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="15dp" />
+
+            <!-- Track data rows ("Label ..... Value"), filled in InspectActivity.addDataRow() -->
+            <LinearLayout
+                android:id="@+id/dataRows"
+                android:layout_width="318dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="15dp" />
+
+            <Button
+                android:id="@+id/exportButton"
+                android:layout_width="200dp"
+                android:layout_height="60dp"
+                android:backgroundTint="#283593"
+                android:text="EXPORT"
+                android:textSize="18sp" />
+
         </LinearLayout>
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="15dp" />
-
-        <TextView
-            android:id="@+id/textViewDateStart"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingLeft="45dp"
-            android:text="Start Date:"
-            android:textAlignment="textStart"
-            android:textSize="18sp" />
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="15dp" />
-
-        <TextView
-            android:id="@+id/elapsed"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingLeft="45dp"
-            android:text="Time Elapsed:"
-            android:textAlignment="textStart"
-            android:textSize="18sp" />
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="15dp" />
-
-        <TextView
-            android:id="@+id/textViewDateEnd"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingLeft="45dp"
-            android:text="Finish Date: "
-            android:textAlignment="textStart"
-            android:textSize="18sp" />
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="15dp" />
-
-        <TextView
-            android:id="@+id/distance"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="45dp"
-            android:text="Distance:"
-            android:textAlignment="textStart"
-            android:textSize="18sp" />
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="15dp" />
-
-        <Button
-            android:id="@+id/exportButton"
-            android:layout_width="200dp"
-            android:layout_height="60dp"
-            android:backgroundTint="#283593"
-            android:text="EXPORT"
-            android:textSize="18sp" />
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="15dp" />
-
-        <TextView
-            android:id="@+id/waypoints"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingLeft="45dp"
-            android:text="Waypoints: "
-            android:textColor="#70000000" />
-
-    </LinearLayout>
+    </ScrollView>
 </androidx.constraintlayout.widget.ConstraintLayout>

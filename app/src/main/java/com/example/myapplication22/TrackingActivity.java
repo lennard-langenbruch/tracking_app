@@ -1,302 +1,187 @@
 package com.example.myapplication22;
 
-import static com.azure.android.maps.control.options.AnimationOptions.animationDuration;
-import static com.azure.android.maps.control.options.AnimationOptions.animationType;
-import static com.azure.android.maps.control.options.CameraOptions.center;
-import static com.azure.android.maps.control.options.CameraOptions.zoom;
-
 import android.annotation.SuppressLint;
 import android.content.Intent;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
-import android.view.View;
-import android.widget.Button;
 import android.widget.TextView;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
-import com.azure.android.maps.control.AzureMaps;
-import com.azure.android.maps.control.MapControl;
-import com.azure.android.maps.control.controls.ZoomControl;
-import com.azure.android.maps.control.layer.SymbolLayer;
-import com.azure.android.maps.control.options.AnimationType;
-import com.azure.android.maps.control.source.DataSource;
-import com.mapbox.geojson.Point;
+import androidx.core.content.ContextCompat;
+
+import com.mapbox.maps.MapView;
+import com.mapbox.maps.Style;
 
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
-
 
 public class TrackingActivity extends AppCompatActivity {
 
+    private static final String TAG = "TrackingActivity";
 
-    static {
-        // Azure Maps API Key
-        //AzureMaps.setSubscriptionKey("");
-    }
+    private static final String LOCATION_SOURCE_ID = "current-location-src";
+    private static final String LOCATION_LAYER_JSON =
+            "{\"id\":\"current-location\",\"type\":\"circle\",\"source\":\"" + LOCATION_SOURCE_ID + "\",\"source-layer\":\"\","
+                    + "\"paint\":{\"circle-radius\":8,\"circle-color\":\"#1976D2\","
+                    + "\"circle-stroke-width\":3,\"circle-stroke-color\":\"#FFFFFF\"}}";
 
-    MapControl mapControl; // Azure Maps Object
-    DatabaseHelper sqliteDao; // Database Access Object
-    GeoLocationClient geoLocation;
-    StopWatchHelper sw;
-    long currentTackId;
-    TextView textLong;
-    TextView textLat;
-    String longitudeString;
-    String latitudeString;
-    String lastSavedLongitude;
-    String lastSavedLatitude;
-    Date df;
-    Date ds;
-    String pattern = "dd.MM.yy HH:mm:ss.SSS"; // Define the desired pattern
-    String gpxPattern = "yyyy-MM-dd'T'HH:mm:ss'Z'";
-    SimpleDateFormat dateFormat = new SimpleDateFormat(pattern);
-    SimpleDateFormat gpxFormat = new SimpleDateFormat(gpxPattern);
-    List<SymbolLayer> layerList = new ArrayList<>();
-    boolean started = false;
-    Handler handler;
+    private final SimpleDateFormat dateFormat = new SimpleDateFormat("dd.MM.yy HH:mm:ss.SSS");
+    private final SimpleDateFormat gpxFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+
+    private MapView mapControl; // Mapbox map (token: res/values/mapbox_access_token.xml)
+    private Style mapStyle; // null until the map style has finished loading
+    private DatabaseHelper sqliteDao; // Database Access Object
+    private GeoLocationClient geoLocation;
+    private StopWatchHelper sw;
+    private long currentTackId;
+    private String currentTrackName;
+    private TextView textLong;
+    private TextView textLat;
+    private TextView textAlt;
+    private String lastSavedLongitude;
+    private String lastSavedLatitude;
+    private Date ds; // track start
+    private boolean started = false;
+    private Handler handler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-
-        Log.d(String.valueOf(TrackingActivity.class), "Tracking onCreate() called");
-
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_tracking);
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.verticalLayout), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
+        UiUtils.applySystemBarPadding(findViewById(R.id.verticalLayout));
+        UiUtils.warnIfMapboxTokenMissing(this);
 
         // Start Tracking Foreground Service
-        Intent serviceIntent = new Intent(this, GeoLocationService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            this.startForegroundService(serviceIntent);
-        } else {
-            this.startService(serviceIntent);
-        }
+        ContextCompat.startForegroundService(this, new Intent(this, GeoLocationService.class));
 
         sqliteDao = new DatabaseHelper(this);
-        sqliteDao.getWritableDatabase(); // !!!
 
         currentTackId = sqliteDao.createSingleTrack("temp", "start", "0");
-        String currentTrackName = "Track " + currentTackId;
+        currentTrackName = "Track " + currentTackId;
         ds = new Date();
-
-        String dateStart = dateFormat.format(ds);
-        sqliteDao.updateSingleTrackById(currentTackId, currentTrackName, dateStart,null,null, null, null);
+        sqliteDao.updateSingleTrackById(currentTackId, currentTrackName, dateFormat.format(ds), null, null, null, null);
 
         TextView timeText = findViewById(R.id.time);
         sw = new StopWatchHelper(timeText);
-        //sw.start();
 
         geoLocation = new GeoLocationClient(this);
 
-            /* Initial Map Load */
-            //geoLocation.getLocation();
-            textLong = findViewById(R.id.longitude);
-            textLat = findViewById(R.id.latitude);
-            mapControl = findViewById(R.id.mapcontrol);
-            mapControl.onCreate(savedInstanceState);
+        textLong = findViewById(R.id.longitude);
+        textLat = findViewById(R.id.latitude);
+        textAlt = findViewById(R.id.altitude);
 
-            if(geoLocation.longitude == 0.0) {
-                timeText.setText("waiting for location to start timer");
-                textLong.setText("loading ... ");
-                textLat.setText("loading ...");
-            }
-
-            if(geoLocation.longitude != 0.0) {
-
-
-
-                started = true;
-                sw.start();
-                longitudeString = String.valueOf(geoLocation.longitude);
-                latitudeString = String.valueOf(geoLocation.latitude);
-                textLong.setText("Longitude: " + longitudeString);
-                textLat.setText("Latitude: " + latitudeString);
-
-                mapControl.getMapAsync(map -> { //);
-                    DataSource source = new DataSource();
-                    map.sources.add(source);
-                    Point p = Point.fromLngLat(geoLocation.longitude, geoLocation.latitude);
-                    source.add(p);
-                    SymbolLayer layer = new SymbolLayer(source);
-                    map.layers.add(layer);
-                    layerList.add(layer);
-
-                    map.setCamera(
-                            center(p),
-                            zoom(14),
-                            animationType(AnimationType.FLY),
-                            animationDuration(2000)
-                    );
-
-                    map.controls.add(new ZoomControl());
-                });
-        }
-
-        Button stopTrackingButton = findViewById(R.id.stopTrackingButton);
-        stopTrackingButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                sw.stop();
-                sw.setRunning(false);
-
-                df = new Date();
-                String dateFinish = dateFormat.format(df); // dateFormat.format(d);
-
-                long differenceInMillis = df.getTime() - ds.getTime();
-
-                long minutes = differenceInMillis / (1000 * 60);
-                long seconds = (differenceInMillis / 1000) % 60;
-                long milliseconds = differenceInMillis % 1000;
-                @SuppressLint("DefaultLocale") String elapsedTimeWithoutStopwatch = String.format("%02d:%02d:%02d", minutes, seconds, milliseconds);
-
-                handler.removeCallbacksAndMessages(null); //
-
-                sqliteDao.updateSingleTrackById(currentTackId, null, null, dateFinish, elapsedTimeWithoutStopwatch, "0", null);
-
-                GeoLocationService.staticInstance.stopSelf();
-
-                Intent intent = new Intent(TrackingActivity.this, MainActivity.class);
-                intent.putExtra("message", currentTrackName + " was saved successfully");
-                startActivity(intent);
-            }
+        mapControl = findViewById(R.id.mapcontrol);
+        MapboxHelper.bindZoomButtons(mapControl, findViewById(R.id.zoomInButton), findViewById(R.id.zoomOutButton));
+        MapboxHelper.setZoom(mapControl.getMapboxMap(), 14.0);
+        mapControl.getMapboxMap().loadStyle(MapboxHelper.STYLE_URI, style -> {
+            // layer for the current position, its data is updated in updateLocation()
+            MapboxHelper.addGeoJsonSource(style, LOCATION_SOURCE_ID, MapboxHelper.emptyFeatureCollection());
+            MapboxHelper.addLayer(style, LOCATION_LAYER_JSON);
+            mapStyle = style;
         });
 
-        // Start a Runnable to periodically update location
-        handler = new Handler();
-        handler.postDelayed(new Runnable() {
+        // The first location fix arrives asynchronously (see updateLocation()).
+        timeText.setText("waiting for location to start timer");
+        textLong.setText("loading ... ");
+        textLat.setText("loading ...");
+        textAlt.setText("loading ...");
+
+        findViewById(R.id.stopTrackingButton).setOnClickListener(v -> {
+            sw.stop();
+            handler.removeCallbacksAndMessages(null);
+            saveTrackEnd();
+
+            GeoLocationService.staticInstance.stopSelf();
+
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.putExtra("message", currentTrackName + " was saved successfully");
+            startActivity(intent);
+        });
+
+        // Periodically update the location (every second, first run immediately)
+        handler = new Handler(Looper.getMainLooper());
+        handler.post(new Runnable() {
             @Override
             public void run() {
-                    updateLocation();
-                    handler.postDelayed(this, 1000); // 1 second interval
-                }
-        }, 0); // Delay for the first run, 0 second
+                updateLocation();
+                handler.postDelayed(this, 1000);
+            }
+        });
     }
 
     // update Location by seconds passed
-    void updateLocation() {
-        DataSource source = new DataSource();
-
-        // geoLocation.getLocation();
-        if(geoLocation.longitude == 0.0) {
+    private void updateLocation() {
+        if (geoLocation.longitude == 0.0) { // no location yet
             textLong.setText("loading ... ");
             textLat.setText("loading ...");
+            textAlt.setText("loading ...");
+            return;
         }
 
-
-        if(geoLocation.longitude != 0.0) { // avoid first value at 0.0
-        if(started == false) {
+        if (!started) {
             started = true;
             sw.start();
         }
 
-        Log.d("TrackingActivity", "(" + geoLocation.latitude + "," + geoLocation.longitude + ")");
-
-        longitudeString = String.valueOf(geoLocation.longitude);
-        latitudeString = String.valueOf(geoLocation.latitude);
+        String longitudeString = String.valueOf(geoLocation.longitude);
+        String latitudeString = String.valueOf(geoLocation.latitude);
 
         textLong.setText("Longitude: " + longitudeString);
         textLat.setText("Latitude: " + latitudeString);
+        textAlt.setText("Altitude: " + formatAltitude(geoLocation.altitude));
 
-        boolean latitudeStringChanged = !latitudeString.equals(lastSavedLatitude);
-        boolean longitudeStringChanged = !longitudeString.equals(lastSavedLongitude);
-
-
-        if (!latitudeStringChanged && !longitudeStringChanged) {
-            Log.d(String.valueOf(GeoLocationClient.class), "No update because location has not changed");
-        }
-
-        if (latitudeStringChanged || longitudeStringChanged) {
-            // Save coordinates and link to track id
+        // Save coordinates and link to track id, but only if the location has changed
+        if (!latitudeString.equals(lastSavedLatitude) || !longitudeString.equals(lastSavedLongitude)) {
             String gpx = gpxFormat.format(new Date());
-            Log.d(String.valueOf(TrackingActivity.class), "Coordinate assigned to track: " + currentTackId);
-            long currentCoordinateid = sqliteDao.createSingleCoordinate(currentTackId, longitudeString, latitudeString, gpx);
-
-            Log.d(String.valueOf(GeoLocationClient.class), "Location/coordinate saved to database: " + longitudeString + ", " + latitudeString + ", timestamp: " + gpx);
+            sqliteDao.createSingleCoordinate(currentTackId, longitudeString, latitudeString, gpx, geoLocation.altitude);
+            Log.d(TAG, "Coordinate saved to track " + currentTackId + ": " + longitudeString + ", " + latitudeString + ", timestamp: " + gpx);
         }
-
-            // place marker on azure map:
-            mapControl = findViewById(R.id.mapcontrol);
-
-            mapControl.getMapAsync(map -> { //mapControl.onReady(map -> {});
-
-                for (SymbolLayer addedLayer : layerList) {
-                    map.layers.remove(addedLayer);
-                }
-                layerList.clear();
-
-                map.sources.add(source);
-
-                Point p = Point.fromLngLat(geoLocation.longitude, geoLocation.latitude);
-                source.add(p);
-                SymbolLayer layer = new SymbolLayer(source);
-                map.layers.add(layer);
-                layerList.add(layer);
-
-                map.setCamera(
-                        center(p),
-                        zoom(14),
-                        animationType(AnimationType.FLY),
-                        animationDuration(2000)
-                );
-
-                if (map.controls.getControls() == null)
-                    map.controls.add(new ZoomControl());
-
-            });
-
-        }
-
         lastSavedLongitude = longitudeString;
         lastSavedLatitude = latitudeString;
 
+        // move the position marker and center the map on it
+        if (mapStyle != null) {
+            MapboxHelper.setGeoJsonData(mapStyle, LOCATION_SOURCE_ID,
+                    MapboxHelper.pointFeature(geoLocation.latitude, geoLocation.longitude));
+        }
+        MapboxHelper.centerOn(mapControl.getMapboxMap(), geoLocation.latitude, geoLocation.longitude);
     }
 
-    @Override
-    protected void onPause() {
-        Log.d(String.valueOf(TrackingActivity.class), "Tracking onPause() called");
+    /** "123 m", or "n/a" if the device delivers no altitude. */
+    private static String formatAltitude(double altitude) {
+        return Double.isNaN(altitude) ? "n/a" : Math.round(altitude) + " m";
+    }
 
-
-        super.onPause();
-        df = new Date();
-        String dateFinish = dateFormat.format(df); // dateFormat.format(d);
-
-        long differenceInMillis = df.getTime() - ds.getTime();
+    /** Writes finish time and elapsed time (without stopwatch) of the current track to the database. */
+    @SuppressLint("DefaultLocale")
+    private void saveTrackEnd() {
+        Date now = new Date();
+        long differenceInMillis = now.getTime() - ds.getTime();
 
         long minutes = differenceInMillis / (1000 * 60);
         long seconds = (differenceInMillis / 1000) % 60;
         long milliseconds = differenceInMillis % 1000;
-        @SuppressLint("DefaultLocale") String elapsedTimeWithoutStopwatch = String.format("%02d:%02d:%02d", minutes, seconds, milliseconds);
+        String elapsedTimeWithoutStopwatch = String.format("%02d:%02d:%02d", minutes, seconds, milliseconds);
 
-        sqliteDao.updateSingleTrackById(currentTackId, null, null, dateFinish, elapsedTimeWithoutStopwatch, "0", null);
+        sqliteDao.updateSingleTrackById(currentTackId, null, null, dateFormat.format(now), elapsedTimeWithoutStopwatch, "0", null);
     }
 
-
+    @Override
+    protected void onPause() {
+        super.onPause();
+        saveTrackEnd();
+    }
 
     @Override
     protected void onDestroy() {
-        Log.d(String.valueOf(TrackingActivity.class), "Tracking onDestroy() called");
-
-
-        super.onDestroy(); // necesarry
+        super.onDestroy(); // necessary
         // stopTracking Button Action minus Intent & View switch
         sw.stop();
-        sw.setRunning(false);
-
-        handler.removeCallbacksAndMessages(null); //
+        handler.removeCallbacksAndMessages(null);
         GeoLocationService.staticInstance.stopSelf();
     }
-
 }

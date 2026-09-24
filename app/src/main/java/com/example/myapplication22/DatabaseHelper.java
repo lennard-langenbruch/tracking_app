@@ -1,8 +1,5 @@
 package com.example.myapplication22;
 
-import static android.database.sqlite.SQLiteDatabase.openOrCreateDatabase;
-
-import android.annotation.SuppressLint;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
@@ -10,85 +7,71 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.util.Log;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 public class DatabaseHelper extends SQLiteOpenHelper {
 
-    public DatabaseHelper(Context context) {
-        super(context, "example3.db", null, 3);
+    private static final String TAG = "DatabaseHelper";
 
-        SQLiteDatabase db = this.getWritableDatabase();
-        Log.d(String.valueOf(DatabaseHelper.class),"reinstanciated at path below");
-        Log.d(String.valueOf(DatabaseHelper.class), db.getPath());
+    // column order must match Track constructor / trackFromCursor()
+    private static final String[] TRACK_COLUMNS = {"ID", "name", "start", "finish", "elapsed"};
+
+    public DatabaseHelper(Context context) {
+        super(context, "example3.db", null, 4);
+        getWritableDatabase(); // open (and create) the database right away
     }
 
     @Override
     public void onCreate(SQLiteDatabase db) {
-
-        String createTrackTable = "CREATE TABLE track (ID INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(255), start VARCHAR(255), finish VARCHAR(255), elapsed VARCHAR(255), distance VARCHAR(255), deleted VARCHAR(255))";
-        db.execSQL(createTrackTable);
-        Log.d(String.valueOf(DatabaseHelper.class), createTrackTable);
-
-        String createCoordinatesTable = "CREATE TABLE coordinates (ID INTEGER PRIMARY KEY AUTOINCREMENT,track_id INTEGER, longitude VARCHAR(255), latitude VARCHAR(255), timestamp VARCHAR(255))";
-        db.execSQL(createCoordinatesTable);
-        Log.d(String.valueOf(DatabaseHelper.class), createCoordinatesTable);
+        db.execSQL("CREATE TABLE track (ID INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(255), start VARCHAR(255), finish VARCHAR(255), elapsed VARCHAR(255), distance VARCHAR(255), deleted VARCHAR(255))");
+        db.execSQL("CREATE TABLE coordinates (ID INTEGER PRIMARY KEY AUTOINCREMENT,track_id INTEGER, longitude VARCHAR(255), latitude VARCHAR(255), timestamp VARCHAR(255), altitude REAL)");
     }
 
     @Override
-    public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {}
+    public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if (oldVersion < 4) {
+            // v4: altitude in meters per coordinate (NULL = unknown, e.g. for tracks recorded before)
+            db.execSQL("ALTER TABLE coordinates ADD COLUMN altitude REAL");
+        }
+    }
 
-    long createSingleCoordinate(long track_id, String longitude, String latitude, String timestamp) {
-        SQLiteDatabase db = this.getWritableDatabase();
+    /** altitude in meters, NaN = unknown (stored as NULL) */
+    long createSingleCoordinate(long trackId, String longitude, String latitude, String timestamp, double altitude) {
+        SQLiteDatabase db = getWritableDatabase();
 
         ContentValues values = new ContentValues();
-        values.put("track_id", track_id);
+        values.put("track_id", trackId);
         values.put("longitude", longitude);
         values.put("latitude", latitude);
         values.put("timestamp", timestamp);
+        if (!Double.isNaN(altitude)) {
+            values.put("altitude", altitude);
+        }
 
         long id = db.insert("coordinates", null, values);
-        Log.d(String.valueOf(DatabaseHelper.class), "Coordinate with id " + id + " created");
-        Log.d(String.valueOf(DatabaseHelper.class), "Linked to track with id " + track_id);
-
         db.close();
-
         return id;
     }
 
-    List<Coordinate> getCoordinatesByTrackId(long track_id) {
+    List<Coordinate> getCoordinatesByTrackId(long trackId) {
         List<Coordinate> coordinates = new ArrayList<>();
-        SQLiteDatabase db = this.getReadableDatabase();
-        try {
-            Cursor cursor = db.rawQuery("SELECT * FROM coordinates WHERE track_id = " + track_id, null); // WHERE track_id = " + track_id
-            Log.d(String.valueOf(DatabaseHelper.class), "Records fetched: " + cursor.getCount());
-
-            if (cursor != null && cursor.moveToFirst()) {
-                do {
-                    @SuppressLint("Range") long id = cursor.getLong(cursor.getColumnIndex("ID"));
-                    @SuppressLint("Range") long trackId = cursor.getLong(cursor.getColumnIndex("track_id"));
-                    @SuppressLint("Range") String longitude = cursor.getString(cursor.getColumnIndex("longitude"));
-                    @SuppressLint("Range") String latitude = cursor.getString(cursor.getColumnIndex("latitude"));
-                    @SuppressLint("Range") String timestamp = cursor.getString(cursor.getColumnIndex("timestamp"));
-
-
-                    Coordinate coordinate = new Coordinate(id, trackId, longitude, latitude, timestamp);
-                    coordinates.add(coordinate);
-
-                    Log.d(String.valueOf(DatabaseHelper.class), "ID: " + id + ", Track ID: " + trackId + ", Longitude: " + longitude + ", Latitude: " + latitude);
-                } while (cursor.moveToNext());
-                cursor.close();
+        SQLiteDatabase db = getReadableDatabase();
+        try (Cursor cursor = db.rawQuery("SELECT longitude, latitude, timestamp, altitude FROM coordinates WHERE track_id = " + trackId, null)) {
+            while (cursor.moveToNext()) {
+                double altitude = cursor.isNull(3) ? Double.NaN : cursor.getDouble(3);
+                coordinates.add(new Coordinate(cursor.getString(0), cursor.getString(1), cursor.getString(2), altitude));
             }
-        }  catch (Exception e) { Log.d(String.valueOf(DatabaseHelper.class), e.toString()); }
+        } catch (Exception e) {
+            Log.d(TAG, e.toString());
+        }
 
         db.close();
         return coordinates;
     }
 
     long createSingleTrack(String name, String start, String deleted) {
-        SQLiteDatabase db = this.getWritableDatabase();
+        SQLiteDatabase db = getWritableDatabase();
 
         ContentValues values = new ContentValues();
         values.put("name", name);
@@ -96,93 +79,63 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         values.put("deleted", deleted);
 
         long id = db.insert("track", null, values);
-        Log.d(String.valueOf(DatabaseHelper.class), "Track with id " + id + " created");
-
         db.close();
-
         return id;
     }
 
     public Track getSingleTrack(long trackId) {
         Track track = null;
-        SQLiteDatabase db = this.getReadableDatabase();
-        Cursor cursor = db.query("Track", null, "ID=?", new String[]{String.valueOf(trackId)}, null, null, null);
-        if (cursor != null && cursor.moveToFirst()) {
-            @SuppressLint("Range") long id = cursor.getLong(cursor.getColumnIndex("ID"));
-            @SuppressLint("Range") String name = cursor.getString(cursor.getColumnIndex("name"));
-            @SuppressLint("Range") String start = cursor.getString(cursor.getColumnIndex("start"));
-            @SuppressLint("Range") String finish = cursor.getString(cursor.getColumnIndex("finish"));
-            @SuppressLint("Range") String elapsed = cursor.getString(cursor.getColumnIndex("elapsed"));
-            @SuppressLint("Range") String distance = cursor.getString(cursor.getColumnIndex("distance"));
-            @SuppressLint("Range") String deleted = cursor.getString(cursor.getColumnIndex("deleted"));
+        SQLiteDatabase db = getReadableDatabase();
+        try (Cursor cursor = db.query("track", TRACK_COLUMNS, "ID=?", new String[]{String.valueOf(trackId)}, null, null, null)) {
+            if (cursor.moveToFirst()) {
+                track = trackFromCursor(cursor);
+            }
+        }
 
-            track = new Track(id, name, start, finish, elapsed, distance, deleted);
-        }
-        // Close the cursor and database connection
-        if (cursor != null) {
-            cursor.close();
-        }
         db.close();
-
         return track;
     }
 
     public List<Track> getAllTracks() {
         List<Track> tracks = new ArrayList<>();
-        SQLiteDatabase db = this.getReadableDatabase();
-        Cursor cursor = db.rawQuery("SELECT * FROM track WHERE deleted = '0'", null);
-
-        if (cursor != null && cursor.moveToFirst()) {
-            do {
-                @SuppressLint("Range") long id = cursor.getLong(cursor.getColumnIndex("ID"));
-                @SuppressLint("Range") String name = cursor.getString(cursor.getColumnIndex("name"));
-                @SuppressLint("Range") String start = cursor.getString(cursor.getColumnIndex("start"));
-                @SuppressLint("Range") String finish = cursor.getString(cursor.getColumnIndex("finish"));
-                @SuppressLint("Range") String elapsed = cursor.getString(cursor.getColumnIndex("elapsed"));
-                @SuppressLint("Range") String distance = cursor.getString(cursor.getColumnIndex("distance"));
-                @SuppressLint("Range") String deleted = cursor.getString(cursor.getColumnIndex("deleted"));
-                Track track = new Track(id, name, start, finish, elapsed, distance, deleted);
-                tracks.add(track);
-            } while (cursor.moveToNext());
-            cursor.close();
+        SQLiteDatabase db = getReadableDatabase();
+        try (Cursor cursor = db.query("track", TRACK_COLUMNS, "deleted = '0'", null, null, null, null)) {
+            while (cursor.moveToNext()) {
+                tracks.add(trackFromCursor(cursor));
+            }
         }
 
         db.close();
         return tracks;
     }
 
-    public void updateSingleTrackById(long trackId, String newName, String newStart, String newFinish, String newElapsed, String newDistance,String newDeleted) {
-        SQLiteDatabase db = this.getWritableDatabase();
-
+    /** Updates only the columns whose new value is not null. */
+    public void updateSingleTrackById(long trackId, String newName, String newStart, String newFinish, String newElapsed, String newDistance, String newDeleted) {
         ContentValues values = new ContentValues();
-        if(newName != null) {
-            values.put("name", newName);
-            Log.d(String.valueOf(DatabaseHelper.class),"name updated");
-        }
-        if(newStart != null) {
-            values.put("start", newStart);
-            Log.d(String.valueOf(DatabaseHelper.class),"start updated");
-        }
-        if(newFinish != null) {
-            values.put("finish", newFinish);
-            Log.d(String.valueOf(DatabaseHelper.class),"finish updated");
-        }
-        if(newElapsed != null) {
-            values.put("elapsed", newElapsed);
-            Log.d(String.valueOf(DatabaseHelper.class), "elapsed updated");
-        }
-        if(newDistance != null) {
-            values.put("distance", newDistance);
-            Log.d(String.valueOf(DatabaseHelper.class), "distance updated");
-        }
-        if(newDeleted != null) {
-            values.put("deleted", newDeleted);
-            Log.d(String.valueOf(DatabaseHelper.class),"deleted updated");
-        }
+        putIfNotNull(values, "name", newName);
+        putIfNotNull(values, "start", newStart);
+        putIfNotNull(values, "finish", newFinish);
+        putIfNotNull(values, "elapsed", newElapsed);
+        putIfNotNull(values, "distance", newDistance);
+        putIfNotNull(values, "deleted", newDeleted);
 
+        SQLiteDatabase db = getWritableDatabase();
         db.update("track", values, "ID=?", new String[]{String.valueOf(trackId)});
-
         db.close();
     }
 
+    private static Track trackFromCursor(Cursor cursor) {
+        return new Track(
+                cursor.getLong(0),
+                cursor.getString(1),
+                cursor.getString(2),
+                cursor.getString(3),
+                cursor.getString(4));
+    }
+
+    private static void putIfNotNull(ContentValues values, String column, String value) {
+        if (value != null) {
+            values.put(column, value);
+        }
+    }
 }

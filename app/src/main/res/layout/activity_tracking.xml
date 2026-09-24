@@ -3,22 +3,32 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/verticalLayout"
+    android:background="@drawable/bg_contours"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:context=".TrackingActivity">
 
-    <!-- Azure Map -->
-
-    <com.azure.android.maps.control.MapControl
-        android:id="@+id/mapcontrol"
-        android:layout_width="261dp"
-        android:layout_height="259dp"
+    <!-- Mapbox map (access token: res/values/mapbox_access_token.xml) with zoom buttons on top -->
+    <FrameLayout
+        android:layout_width="318dp"
+        android:layout_height="280dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:foreground="@drawable/map_border"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.493"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.381"
-        />
+        app:layout_constraintVertical_bias="0.356">
+
+        <com.mapbox.maps.MapView
+            android:id="@+id/mapcontrol"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <include layout="@layout/view_zoom_buttons" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/latitude"
@@ -32,6 +42,19 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintVertical_bias="0.674" />
+
+    <TextView
+        android:id="@+id/altitude"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Altitude:"
+        android:textSize="18sp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.21"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.778" />
 
     <TextView
         android:id="@+id/time"
